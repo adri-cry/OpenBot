@@ -7,9 +7,10 @@
  * `gateway`, which no section describes. So this process does the one thing the server will not:
  * it adds `reasoning.effort` to every model call.
  *
- * It is also where that effort is chosen. `GET`/`POST /effort` are read and written by the Thinking
- * control in OpenBot's composer, which is why they answer CORS from the page's own origin. Nothing
- * else is served: there is no page here to open.
+ * It is also where the model list and that effort are chosen. `GET`/`POST /effort` are read and
+ * written by the Thinking control in OpenBot's composer. `/v1/models` is filtered to the ids in
+ * `gateway.json`: 9router advertises every model of every provider it knows (880 and counting),
+ * not the ones it can actually serve here. Nothing else is served: there is no page here to open.
  */
 const http = require("node:http");
 const fs = require("node:fs");
@@ -19,18 +20,30 @@ const CONFIG = process.env.GATEWAY_CONFIG || "/root/openbot/gateway.json";
 const LEVELS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
 const PORT = Number(process.env.GATEWAY_PORT || 20129);
 
-function effort() {
+function readConfig() {
   try {
-    const value = JSON.parse(fs.readFileSync(CONFIG, "utf8")).effort;
-    return LEVELS.includes(value) ? value : "medium";
+    return JSON.parse(fs.readFileSync(CONFIG, "utf8"));
   } catch {
-    return "medium";
+    return {};
   }
+}
+
+function effort() {
+  const value = readConfig().effort;
+  return LEVELS.includes(value) ? value : "medium";
+}
+
+/** Ids the endpoint is allowed to advertise. Empty means "everything upstream says". */
+function modelAllowlist() {
+  const value = readConfig().models;
+  return Array.isArray(value) ? value.filter((id) => typeof id === "string" && id) : [];
 }
 
 function writeEffort(value) {
   const clean = LEVELS.includes(value) ? value : "medium";
-  fs.writeFileSync(CONFIG, `${JSON.stringify({ effort: clean }, null, 2)}\n`);
+  const config = readConfig();
+  config.effort = clean;
+  fs.writeFileSync(CONFIG, `${JSON.stringify(config, null, 2)}\n`);
   return clean;
 }
 
@@ -116,6 +129,45 @@ const server = http.createServer((req, res) => {
   const headers = { ...req.headers, host: new URL(TARGET).host };
   delete headers["accept-encoding"];
 
+  // The catalogue is the one response this gateway rewrites: OpenBot copies whatever the endpoint
+  // advertises, so the allowlist here is the only place a short, honest model list can live.
+  if (pathname === "/v1/models" && req.method === "GET") {
+    const upstream = http.request(TARGET + "/v1/models", { method: "GET", headers }, (answer) => {
+      let raw = "";
+      answer.setEncoding("utf8");
+      answer.on("data", (chunk) => {
+        raw += chunk;
+      });
+      answer.on("end", () => {
+        let body;
+        try {
+          body = JSON.parse(raw);
+        } catch {
+          json(res, 502, { error: "9router returned an unreadable model list" });
+          return;
+        }
+        const allowed = modelAllowlist();
+        if (allowed.length && Array.isArray(body.data)) {
+          const byId = new Map(body.data.map((model) => [model.id, model]));
+          body.data = allowed.map((id) => byId.get(id)).filter(Boolean);
+        }
+        res.writeHead(answer.statusCode || 502, {
+          "content-type": "application/json; charset=utf-8",
+          "access-control-allow-origin": "*",
+        });
+        res.end(JSON.stringify(body));
+      });
+    });
+    upstream.on("error", (error) => {
+      console.error(
+        JSON.stringify({ type: "gateway-upstream-failed", message: error.message }),
+      );
+      json(res, 502, { error: "9router unreachable" });
+    });
+    upstream.end();
+    return;
+  }
+
   let body = "";
   req.on("data", (chunk) => {
     body += chunk;
@@ -167,6 +219,11 @@ const server = http.createServer((req, res) => {
 
 server.listen(PORT, "0.0.0.0", () => {
   console.log(
-    JSON.stringify({ type: "gateway-listening", port: PORT, effort: effort() }),
+    JSON.stringify({
+      type: "gateway-listening",
+      port: PORT,
+      effort: effort(),
+      models: modelAllowlist().length || "all",
+    }),
   );
 });

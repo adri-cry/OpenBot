@@ -43,3 +43,28 @@ the built app the one the container serves.
 
 The image is pinned by digest because the app is built from the same commit: a moving `:latest`
 could change the API under a dist that no longer matches it.
+
+## The model list
+
+OpenBot copies whatever the endpoint advertises at `/v1/models` into its own catalogue. 9router
+advertises every model of every provider it knows (880 ids here), whether or not this deployment
+has credentials that can actually serve them. Admin → Providers is read-only in a single-user
+deployment — the allowlist that page can show appears only for an organization with sign-in — so
+the short list lives in the gateway:
+
+```json
+{
+  "effort": "medium",
+  "models": [
+    "cx/gpt-6-luna",
+    "cx/gpt-5.6-luna",
+    "alicode/qwen3-max-2026-01-23",
+    "oc/hy4-flash-free",
+    "oc/deepseek-v4.1-flash-free"
+  ]
+}
+```
+
+`/v1/models` returns only those ids, in that order; an empty or absent `models` passes everything
+through. OpenBot reads the catalogue at start-up, so restart its container after editing this file.
+`POST /effort` rewrites the file but keeps `models` intact.
