@@ -56,15 +56,13 @@ the short list lives in the gateway:
 {
   "effort": "medium",
   "models": [
-    "cx/gpt-6-luna",
-    "cx/gpt-5.6-luna",
-    "alicode/qwen3-max-2026-01-23",
-    "oc/hy4-flash-free",
-    "oc/deepseek-v4.1-flash-free"
+    "nous/qwen/qwen4-max:free",
+    "nous/tencent/hy4-flash:free"
   ]
 }
 ```
 
 `/v1/models` returns only those ids, in that order; an empty or absent `models` passes everything
 through. OpenBot reads the catalogue at start-up, so restart its container after editing this file.
-`POST /effort` rewrites the file but keeps `models` intact.
+`POST /effort` rewrites the file but keeps `models` intact. `BOT_MODEL` and `ROUTER_MODEL` in
+OpenBot's `.env` name the default from this list; change them together with the list.

@@ -1,10 +1,7 @@
 {
   "effort": "medium",
   "models": [
-    "cx/gpt-6-luna",
-    "cx/gpt-5.6-luna",
-    "alicode/qwen3-max-2026-01-23",
-    "oc/hy4-flash-free",
-    "oc/deepseek-v4.1-flash-free"
+    "nous/qwen/qwen4-max:free",
+    "nous/tencent/hy4-flash:free"
   ]
 }
