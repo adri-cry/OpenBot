@@ -49,8 +49,9 @@ could change the API under a dist that no longer matches it.
 OpenBot copies whatever the endpoint advertises at `/v1/models` into its own catalogue, and its own
 Admin → Providers page is read-only in a single-user deployment. So this fork replaces that page's
 body with **Model connections**, an editor for the gateway that actually serves the models. From
-there an operator can add, edit and delete endpoints (base URL, key, model prefixes), and choose the
-visible model ids. No SSH and no file editing.
+there an operator can add, edit and delete endpoints (base URL, key, model prefixes), press **Fetch
+models** to read every endpoint's catalogue, then tick the ids OpenBot may show. A filter, All/None
+and a manual id field are there for long or unusual lists. No SSH and no file editing.
 
 The gateway keeps that state in `/root/openbot/gateway.json` (mode 600):
 
