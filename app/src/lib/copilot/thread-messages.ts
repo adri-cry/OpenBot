@@ -66,6 +66,8 @@ const THREAD_MESSAGES_DEADLINE_MS = 1500;
 type ReadThreadMessagesOptions = {
   /** Shorter only in tests; production uses the mount/send ordering deadline. */
   deadlineMs?: number;
+  /** Warm a read before anybody opens the conversation; kept longer, used once. */
+  prefetch?: boolean;
 };
 
 /**
@@ -255,6 +257,17 @@ function argumentsOf(args: unknown): string {
  */
 const recentThreadReads = new Map<string, { at: number; value: StoredThread }>();
 const RECENT_THREAD_READ_MS = 2000;
+/** Reads warmed from the conversation list. Longer lived, but one-shot: a real read takes it. */
+const prefetchedThreadReads = new Map<string, { at: number; value: StoredThread }>();
+const PREFETCHED_THREAD_READ_MS = 60_000;
+
+/** Warm a conversation's stored history before it is opened. Failures are simply not cached. */
+export async function prefetchThreadMessages(threadId: string, agentId: string): Promise<void> {
+  if (!threadId || !agentId) return;
+  const key = `${threadId}\u0000${agentId}`;
+  if (prefetchedThreadReads.has(key)) return;
+  await readThreadMessages(threadId, agentId, { prefetch: true });
+}
 
 export async function readThreadMessages(
   threadId: string,
@@ -266,6 +279,11 @@ export async function readThreadMessages(
   const deadlineMs = options.deadlineMs ?? THREAD_MESSAGES_DEADLINE_MS;
   const cacheKey = options.deadlineMs === undefined ? `${threadId}\u0000${agentId}` : null;
   if (cacheKey) {
+    const warm = prefetchedThreadReads.get(cacheKey);
+    if (warm && Date.now() - warm.at < PREFETCHED_THREAD_READ_MS) {
+      prefetchedThreadReads.delete(cacheKey);
+      return warm.value;
+    }
     const hit = recentThreadReads.get(cacheKey);
     if (hit && Date.now() - hit.at < RECENT_THREAD_READ_MS) return hit.value;
   }
@@ -298,7 +316,8 @@ export async function readThreadMessages(
 
     const result = await Promise.race([read(), deadline]);
     if (cacheKey && result.availability === "ready") {
-      recentThreadReads.set(cacheKey, { at: Date.now(), value: result });
+      if (options.prefetch) prefetchedThreadReads.set(cacheKey, { at: Date.now(), value: result });
+      else recentThreadReads.set(cacheKey, { at: Date.now(), value: result });
     }
     return result;
   } catch {

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { warmConversations } from "@/lib/warm-conversations";
 
 /**
  * How hard the gateway's models think.
@@ -46,6 +47,7 @@ export function GatewayThinking() {
   const trigger = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
+    warmConversations();
     let live = true;
     fetch(endpoint())
       .then((response) => (response.ok ? response.json() : null))
