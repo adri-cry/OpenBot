@@ -113,57 +113,82 @@ function withEffort(payload, level) {
   return { ...payload, reasoning: { effort: level }, reasoning_effort: level };
 }
 
-/** Ask every configured endpoint for its models, then keep only the allowed ids. */
+/** Read one endpoint's model list. One bad endpoint never hides the others. */
+function listFrom(endpoint) {
+  return new Promise((resolve) => {
+    let url;
+    try {
+      url = new URL("/v1/models", String(endpoint.baseUrl).replace(/\/$/, ""));
+    } catch {
+      resolve([]);
+      return;
+    }
+    const headers = endpoint.apiKey ? { authorization: `Bearer ${endpoint.apiKey}` } : {};
+    http
+      .request(
+        url,
+        { method: "GET", headers },
+        (answer) => {
+          let raw = "";
+          answer.setEncoding("utf8");
+          answer.on("data", (chunk) => {
+            raw += chunk;
+          });
+          answer.on("end", () => {
+            try {
+              resolve(JSON.parse(raw).data || []);
+            } catch {
+              console.log(
+                JSON.stringify({ type: "gateway-catalogue-unreadable", provider: endpoint.id }),
+              );
+              resolve([]);
+            }
+          });
+        },
+      )
+      .on("error", () => {
+        console.log(
+          JSON.stringify({ type: "gateway-catalogue-failed", provider: endpoint.id }),
+        );
+        resolve([]);
+      })
+      .end();
+  });
+}
+
+/** The catalogue OpenBot sees: every discovered model, narrowed by the allowlist. */
 async function catalogue(config) {
   const allowed = modelAllowlist();
   const seen = new Map();
   await Promise.all(
-    providers(config).map(
-      (p) =>
-        new Promise((resolve) => {
-          let url;
-          try {
-            url = new URL("/v1/models", String(p.baseUrl).replace(/\/$/, ""));
-          } catch {
-            resolve();
-            return;
-          }
-          const headers = p.apiKey ? { authorization: `Bearer ${p.apiKey}` } : {};
-          http
-            .request(
-              url,
-              { method: "GET", headers },
-              (answer) => {
-                let raw = "";
-                answer.setEncoding("utf8");
-                answer.on("data", (chunk) => {
-                  raw += chunk;
-                });
-                answer.on("end", () => {
-                  try {
-                    const body = JSON.parse(raw);
-                    for (const model of body.data || []) {
-                      if (model && model.id && !seen.has(model.id)) seen.set(model.id, model);
-                    }
-                  } catch {
-                    console.log(
-                      JSON.stringify({ type: "gateway-catalogue-unreadable", provider: p.id }),
-                    );
-                  }
-                  resolve();
-                });
-              },
-            )
-            .on("error", () => {
-              console.log(JSON.stringify({ type: "gateway-catalogue-failed", provider: p.id }));
-              resolve();
-            })
-            .end();
-        }),
-    ),
+    providers(config).map(async (p) => {
+      for (const model of await listFrom(p)) {
+        if (model && model.id && !seen.has(model.id)) seen.set(model.id, model);
+      }
+    }),
   );
   const all = [...seen.values()];
   return allowed.length ? all.filter((m) => allowed.includes(m.id)) : all;
+}
+
+/** What the admin picks from: every model every endpoint advertises, with its owner named. */
+async function discover(config) {
+  const seen = new Map();
+  await Promise.all(
+    providers(config).map(async (p) => {
+      for (const model of await listFrom(p)) {
+        if (!model || !model.id || seen.has(model.id)) continue;
+        seen.set(model.id, {
+          id: model.id,
+          provider: p.id,
+          providerName: p.name,
+          capabilities: model.capabilities || null,
+          contextLength: model.context_length ?? null,
+        });
+      }
+    }),
+  );
+  return [...seen.values()];
 }
 
 const server = http.createServer((req, res) => {
@@ -293,6 +318,13 @@ const server = http.createServer((req, res) => {
       json(res, 200, publicConfig(config));
       return;
     }
+  }
+
+  if (pathname === "/models/available" && method === "GET") {
+    discover(readConfig())
+      .then((models) => json(res, 200, { models }))
+      .catch(() => json(res, 502, { error: "model endpoints unreachable" }));
+    return;
   }
 
   if (!pathname.startsWith("/v1/")) {

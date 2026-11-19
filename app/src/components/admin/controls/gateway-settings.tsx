@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { PageRows, PageSection } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import {
   Item,
@@ -10,7 +11,6 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
-import { Textarea } from "@/components/ui/textarea";
 
 /**
  * Admin, Providers: the endpoints and models this deployment actually serves.
@@ -35,6 +35,14 @@ type GatewayConfig = {
   providers: Provider[];
 };
 
+type AvailableModel = {
+  id: string;
+  provider: string;
+  providerName: string;
+  capabilities: Record<string, unknown> | null;
+  contextLength: number | null;
+};
+
 type Draft = {
   name: string;
   baseUrl: string;
@@ -51,10 +59,14 @@ function endpoint(): string {
 
 export function GatewaySettings() {
   const [config, setConfig] = useState<GatewayConfig | null>(null);
-  const [models, setModels] = useState("");
+  const [available, setAvailable] = useState<AvailableModel[] | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [filter, setFilter] = useState("");
+  const [manual, setManual] = useState("");
   const [draft, setDraft] = useState<Draft>(emptyDraft);
   const [editing, setEditing] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [fetching, setFetching] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
@@ -64,7 +76,7 @@ export function GatewaySettings() {
       .then((body: GatewayConfig | null) => {
         if (!body) throw new Error("The gateway did not answer.");
         setConfig(body);
-        setModels(body.models.join("\n"));
+        setSelected(new Set(body.models));
         setError("");
       })
       .catch((cause: unknown) => setError(String(cause)));
@@ -89,14 +101,37 @@ export function GatewaySettings() {
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
-      setConfig(result as GatewayConfig);
-      setModels((result as GatewayConfig).models.join("\n"));
+      const saved = result as GatewayConfig;
+      setConfig(saved);
+      setSelected(new Set(saved.models));
       setNotice(message);
     } catch (cause) {
       setError(String(cause));
     } finally {
       setBusy(false);
     }
+  };
+
+  const fetchModels = () => {
+    setFetching(true);
+    setError("");
+    fetch(endpoint() + "/models/available")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body: { models?: AvailableModel[] } | null) => {
+        if (!body) throw new Error("The endpoints did not answer.");
+        setAvailable(body.models ?? []);
+      })
+      .catch((cause: unknown) => setError(String(cause)))
+      .finally(() => setFetching(false));
+  };
+
+  const toggle = (id: string, on: boolean) => {
+    setSelected((previous) => {
+      const next = new Set(previous);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
   };
 
   const edit = (provider: Provider) => {
@@ -135,6 +170,13 @@ export function GatewaySettings() {
       setEditing(null);
     });
   };
+
+  const query = filter.trim().toLowerCase();
+  const shown = (available ?? []).filter(
+    (model) =>
+      model.id.toLowerCase().includes(query) ||
+      model.providerName.toLowerCase().includes(query),
+  );
 
   return (
     <PageSection
@@ -230,32 +272,102 @@ export function GatewaySettings() {
           <Separator />
 
           <div className="grid gap-2 py-4">
-            <label className="font-medium text-sm" htmlFor="gateway-models">
-              Visible models
-            </label>
+            <div className="flex items-center justify-between gap-2">
+              <label className="font-medium text-sm" htmlFor="model-filter">
+                Visible models
+              </label>
+              <Button disabled={fetching} onClick={fetchModels} size="sm" variant="outline">
+                {fetching ? "Fetching…" : "Fetch models"}
+              </Button>
+            </div>
             <p className="text-muted-foreground text-xs">
-              One model id per line. Only these are shown and accepted. OpenBot refreshes its list
-              within about ten minutes; endpoint and key changes take effect at once.
+              Fetch asks every configured endpoint what it offers. Pick what OpenBot may show.
+              Changes reach the catalogue within about ten minutes.
             </p>
-            <Textarea
-              id="gateway-models"
-              onChange={(event) => setModels(event.target.value)}
-              rows={6}
-              value={models}
-            />
-            <Button
-              disabled={busy}
-              onClick={() =>
-                void send(
-                  "/models",
-                  "PATCH",
-                  { models: models.split(/\r?\n/).map((m) => m.trim()).filter(Boolean) },
-                  "Model list saved.",
-                )
-              }
-            >
-              Save models
-            </Button>
+
+            {available === null ? (
+              <p className="text-muted-foreground text-xs">
+                Press Fetch models to see what the endpoints offer.
+              </p>
+            ) : (
+              <>
+                <div className="flex gap-2">
+                  <Input
+                    aria-label="Filter models"
+                    id="model-filter"
+                    onChange={(event) => setFilter(event.target.value)}
+                    placeholder="Filter by model id or endpoint"
+                    value={filter}
+                  />
+                  <Button
+                    disabled={selected.size === 0}
+                    onClick={() => setSelected(new Set())}
+                    size="sm"
+                    variant="ghost"
+                  >
+                    None
+                  </Button>
+                  <Button
+                    disabled={selected.size === available.length}
+                    onClick={() => setSelected(new Set(available.map((m) => m.id)))}
+                    size="sm"
+                    variant="ghost"
+                  >
+                    All
+                  </Button>
+                </div>
+
+                <div className="max-h-64 overflow-y-auto rounded-md border">
+                  {shown.length === 0 ? (
+                    <p className="p-2 text-muted-foreground text-xs">No models match.</p>
+                  ) : (
+                    shown.map((model) => (
+                      <label
+                        className="flex items-center gap-2 px-2 py-1.5 text-sm hover:bg-accent"
+                        key={model.id}
+                      >
+                        <Checkbox
+                          aria-label={`Use ${model.id}`}
+                          checked={selected.has(model.id)}
+                          onCheckedChange={(checked) => toggle(model.id, checked === true)}
+                        />
+                        <span className="min-w-0 flex-1 truncate">{model.id}</span>
+                        <span className="text-muted-foreground text-xs">{model.providerName}</span>
+                      </label>
+                    ))
+                  )}
+                </div>
+
+                <div className="flex gap-2">
+                  <Input
+                    aria-label="Add model id"
+                    onChange={(event) => setManual(event.target.value)}
+                    placeholder="Add a model id by hand"
+                    value={manual}
+                  />
+                  <Button
+                    disabled={!manual.trim()}
+                    onClick={() => {
+                      toggle(manual.trim(), true);
+                      setManual("");
+                    }}
+                    size="sm"
+                  >
+                    Add
+                  </Button>
+                </div>
+
+                <p className="text-muted-foreground text-xs">{selected.size} selected</p>
+                <Button
+                  disabled={busy}
+                  onClick={() =>
+                    void send("/models", "PATCH", { models: [...selected] }, "Model list saved.")
+                  }
+                >
+                  Save models
+                </Button>
+              </>
+            )}
           </div>
         </>
       )}
