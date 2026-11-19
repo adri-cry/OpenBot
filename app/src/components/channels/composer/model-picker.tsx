@@ -33,6 +33,7 @@ import {
 } from "@/lib/models/effort";
 import type { ModelCatalogue, ModelOption } from "@/lib/models/queries";
 import { cn } from "@/lib/utils";
+import { GatewayThinking } from "./gateway-thinking";
 
 /** The composer's message box around `inside`, if it is in one. */
 function messageBox(inside: HTMLElement | null): HTMLElement | null {
@@ -221,7 +222,8 @@ function Picker({
     : selected.label;
 
   return (
-    <Combobox<Choice>
+    <>
+      <Combobox<Choice>
       disabled={disabled}
       // A search looks for a model; the efforts belong to the model in use and stay in their column.
       filter={(choice, typed) =>
@@ -408,6 +410,8 @@ function Picker({
           }
         </ComboboxList>
       </ComboboxContent>
-    </Combobox>
+      </Combobox>
+      <GatewayThinking disabled={disabled} />
+    </>
   );
 }
