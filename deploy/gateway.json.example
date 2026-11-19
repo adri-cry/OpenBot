@@ -3,5 +3,14 @@
   "models": [
     "nous/qwen/qwen4-max:free",
     "nous/tencent/hy4-flash:free"
+  ],
+  "providers": [
+    {
+      "id": "p9router",
+      "name": "9router (LAN)",
+      "baseUrl": "http://192.168.1.7:20128",
+      "apiKey": "sk-…",
+      "prefixes": ["nous", "mmf", "oc"]
+    }
   ]
 }

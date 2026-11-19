@@ -6,6 +6,7 @@ import {
   ModelUsageSection,
   ProviderSection,
 } from "@/components/admin/controls/model-sections";
+import { GatewaySettings } from "@/components/admin/controls/gateway-settings";
 import { PageShell } from "@/components/layout/page-shell";
 import { availableModelsQueryOptions } from "@/lib/models/queries";
 
@@ -33,6 +34,7 @@ export function ProvidersPage() {
       }
       title="Providers"
     >
+      <GatewaySettings />
       <ProviderSection />
       <ModelChoiceSection />
       {team ? <ModelAllowlistSection /> : null}
