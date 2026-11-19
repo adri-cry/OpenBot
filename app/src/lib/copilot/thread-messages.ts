@@ -248,6 +248,14 @@ function argumentsOf(args: unknown): string {
   }
 }
 
+/**
+ * A read just after opening a conversation is asked again by the history refresh, sometimes twice,
+ * for bytes that have not changed. Keep a ready read for a couple of seconds so those calls reuse
+ * it instead of asking the server again. A turn's own reads name a deadline and are never cached.
+ */
+const recentThreadReads = new Map<string, { at: number; value: StoredThread }>();
+const RECENT_THREAD_READ_MS = 2000;
+
 export async function readThreadMessages(
   threadId: string,
   agentId: string,
@@ -256,6 +264,11 @@ export async function readThreadMessages(
   const controller = new AbortController();
   let timeout: ReturnType<typeof setTimeout> | undefined;
   const deadlineMs = options.deadlineMs ?? THREAD_MESSAGES_DEADLINE_MS;
+  const cacheKey = options.deadlineMs === undefined ? `${threadId}\u0000${agentId}` : null;
+  if (cacheKey) {
+    const hit = recentThreadReads.get(cacheKey);
+    if (hit && Date.now() - hit.at < RECENT_THREAD_READ_MS) return hit.value;
+  }
 
   try {
     const read = async () => {
@@ -283,7 +296,11 @@ export async function readThreadMessages(
       }, deadlineMs);
     });
 
-    return await Promise.race([read(), deadline]);
+    const result = await Promise.race([read(), deadline]);
+    if (cacheKey && result.availability === "ready") {
+      recentThreadReads.set(cacheKey, { at: Date.now(), value: result });
+    }
+    return result;
   } catch {
     return UNAVAILABLE_THREAD;
   } finally {
